@@ -6,6 +6,10 @@ A health-constrained grocery agent that translates your medical conditions, diet
 
 ---
 
+![HealthCart demo](docs/demo.gif)
+
+---
+
 ## What it does
 
 1. You enter your health profile (conditions, restrictions, allergies, goals, household size, budget)
