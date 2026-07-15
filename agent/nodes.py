@@ -28,6 +28,7 @@ from agent.prompts import (
     PRODUCT_RECOMMENDER_PROMPT,
     COMPLIANCE_VALIDATOR_PROMPT,
 )
+from agent.fdc_client import search_food
 
 # LiteLLM routes to Groq when GROQ_API_KEY is set
 HAIKU = "groq/llama-3.1-8b-instant"     # structured extraction + binary judgment
@@ -193,25 +194,77 @@ def product_recommender_node(state: AgentState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Node 3.5 — Nutrient Grounding  (USDA FoodData Central, no LLM)
+# ---------------------------------------------------------------------------
+
+@observe(name="nutrient_grounding")
+def nutrient_grounding_node(state: AgentState) -> dict:
+    """
+    Look up each generated item against USDA FoodData Central so the
+    validator checks numeric thresholds (sodium/potassium/phosphorus/etc.)
+    against real government-verified values instead of the model's
+    general knowledge of what a food "probably" contains.
+
+    Items with no FDC match are passed through unchanged and marked
+    fdc_grounded: False — the validator still evaluates them, just
+    without real nutrient numbers to check against.
+    """
+    recommendations = state.get("recommendations", [])
+
+    grounded = []
+    for item in recommendations:
+        result = search_food(item.get("name", ""))
+        status = result["status"]
+        grounded.append({
+            **item,
+            "fdc_status": status,               # "grounded" | "no_match" | "lookup_failed"
+            "fdc_grounded": status == "grounded",  # kept for the validator prompt's boolean check
+            "fdc_description": result.get("fdc_description"),
+            "nutrients": result.get("nutrients"),
+        })
+
+    return {"recommendations": grounded}
+
+
+# ---------------------------------------------------------------------------
 # Node 4 — Compliance Validator  (Haiku as judge)
 # ---------------------------------------------------------------------------
 
+def _normalize_name(name: str) -> str:
+    return "".join(ch.lower() for ch in (name or "") if ch.isalnum())
+
+
 @observe(name="compliance_validator")
 def compliance_validator_node(state: AgentState) -> dict:
-    """Score all recommendations in a single batch LLM call."""
+    """Score all recommendations in a single batch LLM call.
+
+    Judgments are matched back to items by name, not list position — an 8B
+    judge model has no structural guarantee it preserves input order, and a
+    silent positional mismatch would attach the wrong verdict to the wrong
+    food. Allergen-relevant items are also tracked as their own metric,
+    since a single blended compliance rate can look healthy while hiding
+    exactly the safety-critical failure class (allergen false negatives)
+    this system exists to catch.
+    """
     recommendations = state.get("recommendations", [])
     constraints = state.get("food_constraints", [])
+    allergies = state.get("health_profile", {}).get("allergies", [])
 
     if not recommendations:
-        return {"validated_list": [], "compliance_rate": 0.0}
+        return {"validated_list": [], "compliance_rate": 0.0, "allergen_compliance_rate": None}
 
     items_for_prompt = [
-        {"name": item.get("name", ""), "rationale": item.get("rationale", "")}
+        {
+            "name": item.get("name", ""),
+            "rationale": item.get("rationale", ""),
+            "usda_nutrients_per_100g": item.get("nutrients"),  # None if ungrounded
+        }
         for item in recommendations
     ]
 
     prompt = COMPLIANCE_VALIDATOR_PROMPT.format(
         constraints=json.dumps(constraints, indent=2),
+        allergies=json.dumps(allergies, indent=2) if allergies else "None",
         items_json=json.dumps(items_for_prompt, indent=2),
     )
 
@@ -221,32 +274,67 @@ def compliance_validator_node(state: AgentState) -> dict:
         if not isinstance(judgments, list):
             raise ValueError("Expected a JSON array from validator")
 
-        # Map results back by position (same order guaranteed by prompt)
+        # Match judgments to items by normalized name first; fall back to
+        # position only for items the judge didn't clearly identify, and
+        # mark those explicitly rather than trusting a silent zip().
+        judgments_by_name = {}
+        unmatched_judgments = []
+        for j in judgments:
+            key = _normalize_name(j.get("name", ""))
+            if key and key not in judgments_by_name:
+                judgments_by_name[key] = j
+            else:
+                unmatched_judgments.append(j)
+
         validated = []
-        for item, judgment in zip(recommendations, judgments):
+        used_positional_fallback = 0
+        for i, item in enumerate(recommendations):
+            key = _normalize_name(item.get("name", ""))
+            judgment = judgments_by_name.pop(key, None)
+
+            if judgment is None:
+                # Name match failed — fall back to position only if a
+                # judgment is still available there, and flag it.
+                if i < len(unmatched_judgments):
+                    judgment = unmatched_judgments[i]
+                    used_positional_fallback += 1
+
+            if judgment is None:
+                validated.append({**item, "passed": None,
+                                   "compliance_notes": "Not evaluated (no matching judgment)",
+                                   "constraint_violated": None, "allergen_relevant": None})
+                continue
+
+            # Missing "compliant" key defaults to False, not True — an
+            # incomplete judgment should not silently read as a pass.
             validated.append({
                 **item,
-                "passed": bool(judgment.get("compliant", True)),
+                "passed": bool(judgment.get("compliant", False)),
                 "compliance_notes": judgment.get("reason", ""),
                 "constraint_violated": judgment.get("constraint_violated"),
+                "allergen_relevant": bool(judgment.get("allergen_relevant", False)),
             })
-
-        # If LLM returned fewer items than expected, mark the rest as uncertain
-        for item in recommendations[len(validated):]:
-            validated.append({**item, "passed": None,
-                               "compliance_notes": "Not evaluated", "constraint_violated": None})
 
     except Exception as exc:
         validated = [
             {**item, "passed": None,
-             "compliance_notes": f"Validation error: {exc}", "constraint_violated": None}
+             "compliance_notes": f"Validation error: {exc}", "constraint_violated": None,
+             "allergen_relevant": None}
             for item in recommendations
         ]
 
     passed_count = sum(1 for i in validated if i.get("passed") is True)
     rate = passed_count / len(validated) if validated else 0.0
 
-    return {"validated_list": validated, "compliance_rate": rate}
+    allergen_items = [i for i in validated if i.get("allergen_relevant") is True]
+    allergen_passed = sum(1 for i in allergen_items if i.get("passed") is True)
+    allergen_rate = (allergen_passed / len(allergen_items)) if allergen_items else None
+
+    return {
+        "validated_list": validated,
+        "compliance_rate": rate,
+        "allergen_compliance_rate": allergen_rate,
+    }
 
 
 # ---------------------------------------------------------------------------

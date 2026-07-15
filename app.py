@@ -13,8 +13,36 @@ load_dotenv()
 
 import streamlit as st
 import litellm
+from langfuse import get_client
 
 from agent.graph import run_agent
+
+
+def _log_feedback(trace_id: str | None, item: dict, agree: bool) -> None:
+    """
+    Log a human agreement/disagreement with the judge's verdict on one item,
+    attached to the exact trace that produced it. This does NOT make the
+    model learn — Langfuse has no fine-tuning capability. It only builds
+    the labeled dataset a human would later use to rewrite the prompt or
+    curate a fine-tuning set (see docs/ANTHROPIC_EVAL_NOTES.md, A-06).
+    """
+    if not trace_id:
+        return
+    try:
+        client = get_client()
+        client.create_score(
+            trace_id=trace_id,
+            name="human_agrees_with_judge",
+            value=1.0 if agree else 0.0,
+            comment=(
+                f"item={item.get('name', '')}; "
+                f"judge_passed={item.get('passed')}; "
+                f"allergen_relevant={item.get('allergen_relevant')}"
+            ),
+        )
+        client.flush()
+    except Exception as exc:
+        st.toast(f"Could not log feedback to Langfuse: {exc}")
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -89,7 +117,9 @@ with st.sidebar:
 # Main area
 # ---------------------------------------------------------------------------
 
-if not generate and not run_eval_btn:
+st.session_state.setdefault("feedback", {})
+
+if not generate and not run_eval_btn and "last_result" not in st.session_state:
     st.info(
         "Fill in your health profile in the sidebar and click **Generate Shopping List**. "
         "The agent will derive food constraints from your conditions, generate grocery "
@@ -98,20 +128,26 @@ if not generate and not run_eval_btn:
 
     with st.expander("How it works"):
         st.markdown("""
-**Pipeline (LangGraph — 5 nodes):**
+**Pipeline (LangGraph — 6 nodes):**
 
 | Node | Model | What it does |
 |---|---|---|
-| 1 · profile_analyzer | Claude Haiku | Normalizes your health conditions |
-| 2 · constraint_extractor | Claude Haiku | Translates conditions → specific food rules |
-| 3 · product_recommender | Claude Sonnet | Generates 15–20 grocery items |
-| 4 · compliance_validator | Claude Haiku (judge) | Scores each item against the constraints |
+| 1 · profile_analyzer | Llama 3.1 8B (Groq) | Normalizes your health conditions |
+| 2 · constraint_extractor | Llama 3.1 8B (Groq) | Translates conditions → specific food rules |
+| 3 · product_recommender | Llama 3.3 70B (Groq) | Generates 15–20 grocery items |
+| 3.5 · nutrient_grounding | USDA FoodData Central (no LLM) | Attaches real nutrient values where a match exists |
+| 4 · compliance_validator | Llama 3.1 8B (Groq, judge) | Scores each item — using real USDA nutrients when available |
 | 5 · list_formatter | Pure Python | Groups by category, sorts passed first |
 
-**North-star metric:** % of recommendations passing automated constraint compliance
+**North-star metric:** % of recommendations passing automated constraint compliance, tracked
+separately for allergen-relevant items (a blended average hides exactly the failure class
+that matters most — see `docs/ANTHROPIC_EVAL_NOTES.md`).
 
 **Langfuse:** Every pipeline run is traced — each node creates a child span.
-Open your Langfuse dashboard to see the full trace tree.
+Open your Langfuse dashboard to see the full trace tree. Thumbs up/down on
+any item logs your agreement with the judge's verdict as a score on that
+trace — this builds a labeled dataset over time, it does not make the
+model "learn" automatically.
         """)
 
 # ---------------------------------------------------------------------------
@@ -139,20 +175,50 @@ if generate:
             st.error(f"Agent error: {exc}")
             st.stop()
 
+    # Store rather than render inline — a feedback button click below
+    # triggers a Streamlit rerun, and without persisted state the whole
+    # list would disappear because `generate` resets to False on rerun.
+    st.session_state["last_result"] = result
+    st.session_state["last_profile"] = profile
+
+if "last_result" in st.session_state:
+    result = st.session_state["last_result"]
+    trace_id = result.get("trace_id")
+
+    # Degraded-mode warning — profile_analyzer already catches parse
+    # errors and falls back to the raw profile (agent/nodes.py), but that
+    # was previously invisible: a list generated from fewer/rougher
+    # constraints than intended looked identical to a normal run.
+    normalized = result.get("normalized_profile") or {}
+    if normalized.get("_parse_error"):
+        st.warning(
+            "⚠️ **Degraded mode:** profile normalization failed and fell back to your "
+            f"raw input (`{normalized['_parse_error']}`). Downstream constraints may be "
+            "less precise than usual — treat this run's compliance badges with extra caution."
+        )
+
     shopping_list = result.get("shopping_list", [])
     constraints = result.get("food_constraints", [])
     compliance_rate = result.get("compliance_rate", 0.0)
+    allergen_rate = result.get("allergen_compliance_rate")
     summary = result.get("summary", "")
 
     # Summary metrics
-    col1, col2, col3 = st.columns(3)
     total = len(shopping_list)
     passed = sum(1 for i in shopping_list if i.get("passed") is True)
     categories = len({i.get("category", "Other") for i in shopping_list})
 
-    col1.metric("Total Items", total)
-    col2.metric("Compliance Rate", f"{compliance_rate:.0%}", delta=f"{passed} passed")
-    col3.metric("Categories", categories)
+    metric_cols = st.columns(4 if allergen_rate is not None else 3)
+    metric_cols[0].metric("Total Items", total)
+    metric_cols[1].metric("Compliance Rate", f"{compliance_rate:.0%}", delta=f"{passed} passed")
+    metric_cols[2].metric("Categories", categories)
+    if allergen_rate is not None:
+        metric_cols[3].metric(
+            "Allergen Compliance", f"{allergen_rate:.0%}",
+            help="Tracked separately from the general rate — a blended average can look "
+                 "healthy while hiding false negatives on the one class of error that's "
+                 "actually dangerous.",
+        )
 
     # Derived constraints
     if constraints:
@@ -182,21 +248,26 @@ if generate:
         emoji = CATEGORY_EMOJI.get(cat, "📦")
         st.subheader(f"{emoji} {cat}")
 
-        for item in by_category[cat]:
+        for i, item in enumerate(by_category[cat]):
             passed_flag = item.get("passed")
             if passed_flag is True:
                 badge = "✅"
-                badge_color = "green"
             elif passed_flag is False:
                 badge = "❌"
-                badge_color = "red"
             else:
                 badge = "⚠️"
-                badge_color = "orange"
 
-            col_name, col_qty, col_badge, col_rationale = st.columns([2, 1, 0.4, 4])
+            col_name, col_qty, col_badge, col_rationale, col_fb = st.columns(
+                [2, 1, 0.4, 3, 1.2]
+            )
             with col_name:
-                st.write(f"**{item.get('name', '')}**")
+                fdc_status = item.get("fdc_status")
+                grounding_tag = {
+                    "grounded": "🏪",       # real USDA match, validator saw real nutrients
+                    "no_match": "✨",        # USDA genuinely has no entry for this
+                    "lookup_failed": "🔌",  # API error/rate-limit — unknown, not "no match"
+                }.get(fdc_status, "✨")
+                st.write(f"**{item.get('name', '')}** {grounding_tag}")
             with col_qty:
                 st.caption(item.get("quantity", ""))
             with col_badge:
@@ -208,10 +279,34 @@ if generate:
                     st.caption(f"⚠️ {note}")
                 else:
                     st.caption(rationale)
+                if item.get("allergen_relevant"):
+                    st.caption("🔺 allergen-checked")
+            with col_fb:
+                fb_key = f"{trace_id or 'notrace'}::{cat}::{i}::{item.get('name', '')}"
+                recorded = st.session_state["feedback"].get(fb_key)
+                if recorded:
+                    st.caption("👍 logged" if recorded == "up" else "👎 logged")
+                else:
+                    up_col, down_col = st.columns(2)
+                    if up_col.button("👍", key=f"up_{fb_key}", help="I agree with this verdict"):
+                        _log_feedback(trace_id, item, agree=True)
+                        st.session_state["feedback"][fb_key] = "up"
+                        st.rerun()
+                    if down_col.button("👎", key=f"down_{fb_key}", help="I disagree with this verdict"):
+                        _log_feedback(trace_id, item, agree=False)
+                        st.session_state["feedback"][fb_key] = "down"
+                        st.rerun()
 
     st.divider()
     st.caption(summary)
-    st.caption("💡 All LLM calls and node traces are visible in your Langfuse dashboard.")
+    st.caption(
+        "💡 All LLM calls and node traces are visible in your Langfuse dashboard. "
+        "🏪 = grounded against real USDA FoodData Central nutrients · ✨ = USDA has no "
+        "matching entry (model's general knowledge only) · 🔌 = USDA lookup failed "
+        "(rate-limited or unreachable — the food may still exist, we just couldn't check). "
+        "Thumbs up/down logs your agreement with the judge as a score on this run's "
+        "trace — it records ground truth, it does not retrain the model."
+    )
 
 # ---------------------------------------------------------------------------
 # Eval harness tab

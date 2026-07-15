@@ -17,10 +17,16 @@ class AgentState(TypedDict, total=False):
     # After compliance_validator
     validated_list: list            # recommendations + compliance_score, compliance_notes, passed fields
     compliance_rate: float          # 0.0–1.0
+    allergen_compliance_rate: Optional[float]  # 0.0–1.0, or None if no allergen-relevant items
 
     # After list_formatter
     shopping_list: list             # sorted by category, passed items first
     summary: str                    # "18 items · 15 passed compliance (83%)"
+
+    # Set by run_agent() after the graph completes — the Langfuse trace ID
+    # for this run, so a later human-feedback action can attach a score to
+    # the exact run it's judging.
+    trace_id: Optional[str]
 
     # Error passthrough
     error: Optional[str]

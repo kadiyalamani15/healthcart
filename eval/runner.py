@@ -44,6 +44,7 @@ def run_eval(cases: list, langfuse: Langfuse) -> dict:
         try:
             result = run_agent(case["profile"])
             rate = result.get("compliance_rate", 0.0)
+            allergen_rate = result.get("allergen_compliance_rate")
             expected = case["expected_min_compliance"]
             passed = rate >= expected
 
@@ -51,19 +52,24 @@ def run_eval(cases: list, langfuse: Langfuse) -> dict:
                 "test_id": case["id"],
                 "name": case["name"],
                 "compliance_rate": round(rate, 3),
+                "allergen_compliance_rate": round(allergen_rate, 3) if allergen_rate is not None else None,
                 "expected_min": expected,
                 "passed": passed,
                 "item_count": len(result.get("shopping_list", [])),
                 "error": None,
             })
 
-            print(f"{'PASS' if passed else 'FAIL'} ({rate:.0%} vs {expected:.0%} expected)")
+            allergen_note = (
+                f", allergen {allergen_rate:.0%}" if allergen_rate is not None else ""
+            )
+            print(f"{'PASS' if passed else 'FAIL'} ({rate:.0%} vs {expected:.0%} expected{allergen_note})")
 
         except Exception as exc:
             results.append({
                 "test_id": case["id"],
                 "name": case["name"],
                 "compliance_rate": 0.0,
+                "allergen_compliance_rate": None,
                 "expected_min": case["expected_min_compliance"],
                 "passed": False,
                 "item_count": 0,
@@ -80,6 +86,11 @@ def run_eval(cases: list, langfuse: Langfuse) -> dict:
         if (total - errors) > 0
         else 0.0
     )
+    allergen_rates = [
+        r["allergen_compliance_rate"] for r in results
+        if r.get("allergen_compliance_rate") is not None
+    ]
+    avg_allergen_rate = sum(allergen_rates) / len(allergen_rates) if allergen_rates else None
 
     summary = {
         "total_cases": total,
@@ -88,21 +99,30 @@ def run_eval(cases: list, langfuse: Langfuse) -> dict:
         "errors": errors,
         "pass_rate": round(passed_count / total, 3) if total else 0.0,
         "avg_compliance_rate": round(avg_rate, 3),
+        "avg_allergen_compliance_rate": round(avg_allergen_rate, 3) if avg_allergen_rate is not None else None,
         "results": results,
     }
 
-    # Log aggregate score to Langfuse
+    # Log aggregate score to Langfuse. Note: the SDK pinned in requirements.txt
+    # (langfuse>=3.0.0,<4.0.0) replaced the old `.trace()` builder with
+    # `start_as_current_span()` + `score_current_trace()` — a call to
+    # `langfuse.trace(...)` on this client raises AttributeError and was
+    # being silently swallowed by the except below on every eval run.
     try:
-        trace = langfuse.trace(
+        with langfuse.start_as_current_span(
             name="healthcart_eval_run",
             input={"cases_run": total},
             output=summary,
-            tags=["eval"],
-        )
-        trace.score(name="eval_pass_rate", value=summary["pass_rate"])
-        trace.score(name="avg_compliance_rate", value=summary["avg_compliance_rate"])
+        ) as span:
+            trace_id = span.trace_id
+            langfuse.score_current_trace(name="eval_pass_rate", value=summary["pass_rate"])
+            langfuse.score_current_trace(name="avg_compliance_rate", value=summary["avg_compliance_rate"])
+            if avg_allergen_rate is not None:
+                langfuse.score_current_trace(
+                    name="avg_allergen_compliance_rate", value=avg_allergen_rate
+                )
         langfuse.flush()
-        print(f"\n  Eval results logged to Langfuse — trace: {trace.id}")
+        print(f"\n  Eval results logged to Langfuse — trace: {trace_id}")
     except Exception as exc:
         print(f"\n  Could not log to Langfuse: {exc}")
 
@@ -119,14 +139,21 @@ def print_summary(summary: dict) -> None:
     print(f"  Errors           : {summary['errors']}")
     print(f"  Pass rate        : {summary['pass_rate']:.0%}")
     print(f"  Avg compliance   : {summary['avg_compliance_rate']:.0%}")
+    if summary.get("avg_allergen_compliance_rate") is not None:
+        print(f"  Avg allergen     : {summary['avg_allergen_compliance_rate']:.0%}  "
+              f"(tracked separately — see ANTHROPIC_EVAL_NOTES.md)")
     print("=" * 52)
 
     print("\nPer-case breakdown:")
     for r in summary["results"]:
         status = "✓" if r["passed"] else ("!" if r["error"] else "✗")
+        allergen_str = (
+            f" | allergen {r['allergen_compliance_rate']:.0%}"
+            if r.get("allergen_compliance_rate") is not None else ""
+        )
         print(
             f"  {status} [{r['test_id']}] {r['name']:<40} "
-            f"{r['compliance_rate']:.0%} (min {r['expected_min']:.0%})"
+            f"{r['compliance_rate']:.0%} (min {r['expected_min']:.0%}){allergen_str}"
         )
 
 
