@@ -1,0 +1,282 @@
+[
+  {
+    "id": "tc001",
+    "name": "Type 2 Diabetes — basic",
+    "profile": {
+      "conditions": ["Type 2 Diabetes"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Blood sugar management", "Weight loss"],
+      "household_size": 2,
+      "budget": "$80/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Core diabetic profile — agent must avoid high-GI foods"
+  },
+  {
+    "id": "tc002",
+    "name": "Hypertension — basic",
+    "profile": {
+      "conditions": ["Hypertension"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Lower blood pressure", "Heart health"],
+      "household_size": 2,
+      "budget": "$90/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Low-sodium DASH-adjacent profile"
+  },
+  {
+    "id": "tc003",
+    "name": "Type 2 Diabetes + Hypertension",
+    "profile": {
+      "conditions": ["Type 2 Diabetes", "Hypertension"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Blood sugar management", "Lower blood pressure"],
+      "household_size": 3,
+      "budget": "$120/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Combined conditions — stricter constraint set"
+  },
+  {
+    "id": "tc004",
+    "name": "Celiac Disease",
+    "profile": {
+      "conditions": ["Celiac Disease"],
+      "restrictions": ["Gluten-free"],
+      "allergies": [],
+      "goals": ["Gut health", "Reduce inflammation"],
+      "household_size": 1,
+      "budget": "$70/week"
+    },
+    "expected_min_compliance": 0.80,
+    "notes": "Strict gluten exclusion — no wheat, barley, rye"
+  },
+  {
+    "id": "tc005",
+    "name": "Heart Disease",
+    "profile": {
+      "conditions": ["Heart Disease"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Heart health", "Lower cholesterol", "Reduce saturated fat"],
+      "household_size": 2,
+      "budget": "$100/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Mediterranean-adjacent diet signal"
+  },
+  {
+    "id": "tc006",
+    "name": "Vegetarian + Lactose Intolerant",
+    "profile": {
+      "conditions": [],
+      "restrictions": ["Vegetarian", "Dairy-free"],
+      "allergies": ["Dairy"],
+      "goals": ["Balanced nutrition", "Increase protein"],
+      "household_size": 2,
+      "budget": "$85/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Plant-based protein sourcing without dairy"
+  },
+  {
+    "id": "tc007",
+    "name": "Vegan + Type 2 Diabetes",
+    "profile": {
+      "conditions": ["Type 2 Diabetes"],
+      "restrictions": ["Vegan"],
+      "allergies": [],
+      "goals": ["Blood sugar management", "Plant-based eating"],
+      "household_size": 1,
+      "budget": "$65/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Intersection of vegan and low-GI constraints"
+  },
+  {
+    "id": "tc008",
+    "name": "Peanut + Tree Nut Allergy",
+    "profile": {
+      "conditions": [],
+      "restrictions": [],
+      "allergies": ["Peanuts", "Tree nuts"],
+      "goals": ["Safe eating", "General health"],
+      "household_size": 4,
+      "budget": "$150/week"
+    },
+    "expected_min_compliance": 0.85,
+    "notes": "Safety-critical — agent must never recommend nut-containing products"
+  },
+  {
+    "id": "tc009",
+    "name": "IBS — Low-FODMAP",
+    "profile": {
+      "conditions": ["IBS"],
+      "restrictions": ["Low-FODMAP"],
+      "allergies": [],
+      "goals": ["Gut health", "Reduce bloating and pain"],
+      "household_size": 2,
+      "budget": "$90/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Low-FODMAP is nuanced — onion, garlic, wheat, legumes all problematic"
+  },
+  {
+    "id": "tc010",
+    "name": "High Cholesterol",
+    "profile": {
+      "conditions": ["High Cholesterol"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Reduce LDL cholesterol", "Increase HDL"],
+      "household_size": 2,
+      "budget": "$85/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Avoid saturated fats, trans fats; prefer soluble fiber"
+  },
+  {
+    "id": "tc011",
+    "name": "Kidney Disease",
+    "profile": {
+      "conditions": ["Chronic Kidney Disease"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Protect kidney function", "Low potassium", "Low phosphorus"],
+      "household_size": 1,
+      "budget": "$70/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Highly specific dietary restrictions — bananas, tomatoes, dairy all risky"
+  },
+  {
+    "id": "tc012",
+    "name": "Celiac + Lactose Intolerant",
+    "profile": {
+      "conditions": ["Celiac Disease"],
+      "restrictions": ["Gluten-free", "Dairy-free"],
+      "allergies": ["Gluten"],
+      "goals": ["Gut health", "Safe eating"],
+      "household_size": 2,
+      "budget": "$100/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Double exclusion — gluten and dairy"
+  },
+  {
+    "id": "tc013",
+    "name": "Type 2 Diabetes + High Cholesterol",
+    "profile": {
+      "conditions": ["Type 2 Diabetes", "High Cholesterol"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Blood sugar management", "Reduce LDL"],
+      "household_size": 2,
+      "budget": "$95/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Avoid high-GI AND high-saturated-fat simultaneously"
+  },
+  {
+    "id": "tc014",
+    "name": "Vegan + Gluten-free",
+    "profile": {
+      "conditions": [],
+      "restrictions": ["Vegan", "Gluten-free"],
+      "allergies": [],
+      "goals": ["Balanced nutrition", "Anti-inflammatory"],
+      "household_size": 1,
+      "budget": "$75/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "Plant-based with gluten exclusion — tests grain alternatives"
+  },
+  {
+    "id": "tc015",
+    "name": "Ketogenic Diet",
+    "profile": {
+      "conditions": [],
+      "restrictions": ["Keto"],
+      "allergies": [],
+      "goals": ["Weight loss", "Ketosis maintenance", "Mental clarity"],
+      "household_size": 2,
+      "budget": "$110/week"
+    },
+    "expected_min_compliance": 0.75,
+    "notes": "High fat, very low carb — most fruits and grains fail"
+  },
+  {
+    "id": "tc016",
+    "name": "GERD / Acid Reflux",
+    "profile": {
+      "conditions": ["GERD", "Acid Reflux"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Reduce reflux symptoms", "Soothing foods"],
+      "household_size": 2,
+      "budget": "$80/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Avoid tomatoes, citrus, spicy food, caffeine, fried food"
+  },
+  {
+    "id": "tc017",
+    "name": "Hypertension + Heart Disease",
+    "profile": {
+      "conditions": ["Hypertension", "Heart Disease"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Cardiovascular health", "Lower blood pressure", "Reduce inflammation"],
+      "household_size": 2,
+      "budget": "$100/week"
+    },
+    "expected_min_compliance": 0.72,
+    "notes": "Combined cardiovascular constraints — low sodium + low saturated fat"
+  },
+  {
+    "id": "tc018",
+    "name": "PCOS — Hormone Balance",
+    "profile": {
+      "conditions": ["PCOS"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Hormone balance", "Weight management", "Reduce insulin resistance"],
+      "household_size": 1,
+      "budget": "$75/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Low-GI anti-inflammatory diet for insulin resistance"
+  },
+  {
+    "id": "tc019",
+    "name": "Type 1 Diabetes — Carb Consistency",
+    "profile": {
+      "conditions": ["Type 1 Diabetes"],
+      "restrictions": [],
+      "allergies": [],
+      "goals": ["Blood sugar management", "Consistent carbohydrate intake", "Balanced meals"],
+      "household_size": 2,
+      "budget": "$90/week"
+    },
+    "expected_min_compliance": 0.72,
+    "notes": "Consistent carb counts matter more than simply low-GI"
+  },
+  {
+    "id": "tc020",
+    "name": "Celiac + Peanut Allergy + Vegetarian",
+    "profile": {
+      "conditions": ["Celiac Disease"],
+      "restrictions": ["Vegetarian", "Gluten-free"],
+      "allergies": ["Peanuts"],
+      "goals": ["Safe balanced eating", "Adequate protein"],
+      "household_size": 2,
+      "budget": "$95/week"
+    },
+    "expected_min_compliance": 0.70,
+    "notes": "Three simultaneous constraints — tests the agent under high exclusion load"
+  }
+]
